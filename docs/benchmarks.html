@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmarks · ssmix</title>
+<meta name="description" content="ssmix: training-free scale-space transformers on Daubechies wavelets.">
+<link rel="stylesheet" href="style.css">
+
+</head>
+<body>
+<header><div class="bar"><a class="brand" href="index.html">ss<span>mix</span></a>
+<nav><a href="index.html">Overview</a><a href="article.html">Article</a><a href="method.html">Method</a><a href="api.html">API</a><a href="benchmarks.html" class=on>Benchmarks</a><a class="gh" href="https://github.com/AngshulMajumdar/ssmix">GitHub</a></nav></div></header>
+<main>
+
+<h1>Benchmarks</h1>
+<p class=lead>Frozen embeddings and one linear probe for every model. ssmix is never trained; the probe is the only
+fitted component.</p>
+
+<h2>Protocol</h2>
+<ul>
+<li><b>Probe:</b> StandardScaler, then multinomial logistic regression. C is chosen from
+{10<sup>−3</sup>, 10<sup>−2</sup>, 10<sup>−1</sup>, 1} by 3-fold cross-validation inside each training split.
+The probe is identical for every model.</li>
+<li><b>ESC-50:</b> 2,000 five-second clips in 50 environmental classes, official 5-fold cross-validation.</li>
+<li><b>FSDD:</b> Free Spoken Digit Dataset, 3,000 recordings of the digits 0–9, official split (takes 0–4 form the test set).
+Clips are zero-padded to 2.3 s; PANNs CNN14 receives each clip at its true length.</li>
+<li>The ssmix configuration was selected on ESC-50 folds 1–4 only; fold 5 never influenced a design choice.</li>
+<li>Pretrained baselines use the authors' released weights; wav2vec 2.0 uses the mean-pooled states of all 13 layers.</li>
+</ul>
+<p>Reproduce with the scripts in <a href="https://github.com/AngshulMajumdar/ssmix/tree/main/benchmarks"><code>benchmarks/</code></a>.</p>
+
+<h2>ESC-50 (accuracy %, 5-fold mean ± std)</h2>
+<table><tr><th>Model</th><th>Pretraining</th><th class=num>Accuracy</th></tr><tr class=ours><td>ssmix AudioEmbedder</td><td>none</td><td class=num>74.6 ± 1.1</td></tr><tr><td>All eight hand-crafted sets, concatenated</td><td>none</td><td class=num>73.9 ± 2.2</td></tr><tr><td>openSMILE ComParE 2016 (6,373 functionals)</td><td>none</td><td class=num>71.2 ± 2.6</td></tr><tr><td>VGGish</td><td>YouTube-8M</td><td class=num>71.0 ± 1.5</td></tr><tr><td>wav2vec 2.0 base (all layers, mean-pooled)</td><td>LibriSpeech 960 h</td><td class=num>68.4 ± 3.8</td></tr><tr><td>librosa ESC bundle (MFCC, Δ, chroma, contrast, tonnetz, spectral)</td><td>none</td><td class=num>52.3 ± 3.8</td></tr><tr><td>Wavelet scattering, orders 0–2 (kymatio, J=9, Q=8)</td><td>none</td><td class=num>50.7 ± 3.6</td></tr><tr><td>openSMILE eGeMAPS v02 (88 functionals)</td><td>none</td><td class=num>50.6 ± 2.3</td></tr><tr><td>Gammatone cepstral coefficients + Δ</td><td>none</td><td class=num>46.7 ± 3.4</td></tr><tr><td>Random-init Transformer (4 layers, d=256)</td><td>none</td><td class=num>45.0 ± 2.3</td></tr><tr><td>MFCC + Δ, mean/std</td><td>none</td><td class=num>44.6 ± 2.4</td></tr><tr><td>Log-mel, mean/std</td><td>none</td><td class=num>42.9 ± 3.1</td></tr><tr><td>Constant-Q spectrum, mean/std</td><td>none</td><td class=num>37.4 ± 3.3</td></tr></table>
+<h3>Per fold</h3>
+<table><tr><th>Model</th><th class=num>Fold 1</th><th class=num>Fold 2</th><th class=num>Fold 3</th><th class=num>Fold 4</th>
+<th class=num>Fold 5</th><th class=num>Folds won by ssmix</th></tr><tr class=ours><td>ssmix AudioEmbedder</td><td class=num>75.0</td><td class=num>72.5</td><td class=num>75.5</td><td class=num>74.8</td><td class=num>75.5</td><td class=num>—</td></tr><tr><td>VGGish</td><td class=num>72.8</td><td class=num>70.5</td><td class=num>72.0</td><td class=num>71.2</td><td class=num>68.5</td><td class=num>5/5</td></tr><tr><td>wav2vec 2.0 base</td><td class=num>67.5</td><td class=num>65.2</td><td class=num>65.8</td><td class=num>75.8</td><td class=num>67.8</td><td class=num>4/5</td></tr><tr><td>openSMILE ComParE 2016</td><td class=num>69.5</td><td class=num>72.0</td><td class=num>71.2</td><td class=num>75.5</td><td class=num>67.8</td><td class=num>4/5</td></tr></table>
+
+<h2>FSDD (accuracy %, official split)</h2>
+<table><tr><th>Model</th><th>Pretraining</th><th class=num>Accuracy</th></tr><tr class=ours><td>ssmix AudioEmbedder</td><td>none</td><td class=num>99.0</td></tr><tr><td>EfficientAT MobileNet mn10</td><td>AudioSet</td><td class=num>98.7</td></tr><tr><td>Random-init Transformer (4 layers, d=256)</td><td>none</td><td class=num>98.3</td></tr><tr><td>PaSST-S</td><td>AudioSet</td><td class=num>98.0</td></tr><tr><td>librosa ESC bundle (MFCC, Δ, chroma, contrast, tonnetz, spectral)</td><td>none</td><td class=num>97.3</td></tr><tr><td>Log-mel, mean/std</td><td>none</td><td class=num>97.0</td></tr><tr><td>wav2vec 2.0 base (all layers, mean-pooled)</td><td>LibriSpeech 960 h</td><td class=num>97.0</td></tr><tr><td>Wavelet scattering, orders 0–2 (kymatio, J=9, Q=8)</td><td>none</td><td class=num>96.3</td></tr><tr><td>MFCC + Δ, mean/std</td><td>none</td><td class=num>95.7</td></tr><tr><td>Gammatone cepstral coefficients + Δ</td><td>none</td><td class=num>95.3</td></tr><tr><td>Constant-Q spectrum, mean/std</td><td>none</td><td class=num>89.3</td></tr><tr><td>openSMILE eGeMAPS v02 (88 functionals)</td><td>none</td><td class=num>89.0</td></tr><tr><td>PANNs CNN14</td><td>AudioSet</td><td class=num>85.7</td></tr><tr><td>VGGish</td><td>YouTube-8M</td><td class=num>62.0</td></tr></table>
+
+<h2>Speed</h2>
+<p>CPU with 2 threads, batch 1, 64 channels, fp32; times in milliseconds.</p>
+<table><tr><th class=num>Tokens T</th><th class=num>Tight frame (db4, J = 8)</th><th class=num>Cross-scale mixer (db4, J = 8, k = 2)</th></tr><tr><td class=num>1,024</td><td class=num>5.0</td><td class=num>37.1</td></tr><tr><td class=num>4,096</td><td class=num>12.1</td><td class=num>117.2</td></tr><tr><td class=num>16,384</td><td class=num>44.1</td><td class=num>351.1</td></tr><tr><td class=num>65,536</td><td class=num>464.3</td><td class=num>1823.7</td></tr></table>
+<ul>
+<li>At 16,384 tokens the cross-scale mixer is 4.3× faster than parameter-free softmax attention
+(351.1 ms vs 1,495.8 ms). Its cost grows near-linearly in T, while attention grows quadratically.</li>
+<li>The tight frame's cost is flat in support: 43.8 ms with db1, 42.8 ms with db4 and
+50.3 ms with db16 at 16,384 tokens.</li>
+<li>Embedding all 2,000 ESC-50 clips (10,000 s of audio) takes 197 s on the same CPU.</li>
+</ul>
+<p>Run <code>python benchmarks/speed.py --device cuda</code> for GPU timings.</p>
+
+</main>
+<footer><div class="bar"><span>ssmix 0.1.0 · Angshul Majumdar</span><a href="https://github.com/AngshulMajumdar/ssmix">github.com/AngshulMajumdar/ssmix</a></div></footer>
+</body>
+</html>

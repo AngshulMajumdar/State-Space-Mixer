@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssmix"
+version = "0.1.0"
+description = "Training-free scale-space transformers on Daubechies wavelets: GPU-efficient cross-scale mixers and an audio embedder"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Angshul Majumdar" }]
+dependencies = ["torch>=2.0", "torchaudio>=2.0", "numpy>=1.22", "mpmath>=1.2"]
+keywords = ["wavelets", "Daubechies", "scale space", "training-free", "audio embeddings", "token mixer"]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "PyWavelets>=1.4"]
+hub = ["huggingface_hub>=0.20"]
+benchmarks = ["scikit-learn>=1.2", "pandas>=1.5", "soundfile>=0.12", "kymatio>=0.3", "hear21passt", "librosa", "resampy",
+              "opensmile", "spafe", "transformers", "panns_inference"]
+
+[project.urls]
+Homepage = "https://github.com/AngshulMajumdar/ssmix"
+Documentation = "https://angshulmajumdar.github.io/ssmix/"
+Demo = "https://huggingface.co/spaces/Angshul/ssmix-audio-embedder"
+
+[tool.setuptools]
+packages = ["ssmix"]

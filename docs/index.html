@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview · ssmix</title>
+<meta name="description" content="ssmix: training-free scale-space transformers on Daubechies wavelets.">
+<link rel="stylesheet" href="style.css">
+
+</head>
+<body>
+<header><div class="bar"><a class="brand" href="index.html">ss<span>mix</span></a>
+<nav><a href="index.html" class=on>Overview</a><a href="article.html">Article</a><a href="method.html">Method</a><a href="api.html">API</a><a href="benchmarks.html">Benchmarks</a><a class="gh" href="https://github.com/AngshulMajumdar/ssmix">GitHub</a></nav></div></header>
+<main>
+
+<h1>Training-free scale-space transformers on Daubechies wavelets</h1>
+<p class=lead>ssmix replaces learned attention with exact multiscale operators: Daubechies wavelets of any
+order, a GPU-batched tight frame, and a cross-scale attention mixer in which every wavelet coefficient
+attends to its siblings, parent and children. Nothing is trained.</p>
+
+<div class=cards>
+<div class=card><b>ESC-50, linear probe</b><span class=big>74.6%</span><br><span class=note>no training · ahead of VGGish, wav2vec 2.0 and openSMILE ComParE</span></div>
+<div class=card><b>Exact by construction</b><span class=big>10<sup>−12</sup></span><br><span class=note>reconstruction error (float64); filters identical to PyWavelets db1–db38</span></div>
+<div class=card><b>Zero parameters</b><span class=big>0</span><br><span class=note>no weights, no data, no fine-tuning</span></div>
+</div>
+
+<h2>Install</h2>
+<pre><code>pip install git+https://github.com/AngshulMajumdar/ssmix</code></pre>
+<p>Try it in the browser: <a href="https://huggingface.co/spaces/Angshul/ssmix-audio-embedder">live demo on Hugging Face Spaces</a>.</p>
+<p>Requires Python ≥ 3.9, PyTorch ≥ 2.0, torchaudio, NumPy and mpmath.</p>
+
+<h2>Embed audio in three lines</h2>
+<pre><code>from ssmix import AudioEmbedder
+
+emb = AudioEmbedder()                                  # no weights to download
+E = emb.embed(waves, sample_rate=44100, length=5.0)    # list of 1-D arrays -> (N, D) numpy</code></pre>
+<p>Inputs are resampled to 32 kHz. With <code>length</code> every clip is padded or cut to the same
+duration, so all embeddings share one dimension. Use the embeddings with any linear model, k-NN or clustering.</p>
+
+<h2>Use the mixers as layers</h2>
+<pre><code>import torch
+from ssmix import SWTCrossScaleMixer, ScaleSpaceMixer
+
+x = torch.randn(8, 4096, 64)                           # (batch, tokens, channels)
+mix = SWTCrossScaleMixer(order=4, heads=8, window=2, tau=0.1)
+y = mix(x)                                             # same shape, cross-scale attention
+
+frame = ScaleSpaceMixer(order=8, rule="identity")      # db8 tight frame
+W = frame.analysis(x)                                  # (8, J+1, 4096, 64) scale-space coefficients
+assert torch.allclose(frame(x), x, atol=1e-5)          # exact round trip</code></pre>
+
+<h2>What is inside</h2>
+<table>
+<tr><th>Object</th><th>Role</th></tr>
+<tr><td><a href="api.html#AudioEmbedder"><code>AudioEmbedder</code></a></td><td>Training-free audio transformer: log-mel → cross-scale mixer blocks → pooled scale-space readout.</td></tr>
+<tr><td><a href="api.html#SWTCrossScaleMixer"><code>SWTCrossScaleMixer</code></a></td><td>Cross-scale attention on the undecimated, delay-aligned Daubechies frame; shift-equivariant.</td></tr>
+<tr><td><a href="api.html#CrossScaleMixer"><code>CrossScaleMixer</code></a></td><td>The same attention on the decimated orthonormal wavelet tree.</td></tr>
+<tr><td><a href="api.html#ScaleSpaceMixer"><code>ScaleSpaceMixer</code></a></td><td>FFT-batched Daubechies tight frame for any length, with parameter-free gate rules.</td></tr>
+<tr><td><a href="api.html#DWT"><code>DWT</code></a></td><td>Periodic orthonormal DWT/IDWT, identical to PyWavelets <code>periodization</code>.</td></tr>
+<tr><td><a href="api.html#daubechies"><code>daubechies</code></a></td><td>Daubechies filters of any order, built from scratch by spectral factorisation.</td></tr>
+</table>
+<p>The full write-up is the <a href="article.html">article</a>; the construction is on <a href="method.html">Method</a>
+and the measurements on <a href="benchmarks.html">Benchmarks</a>.</p>
+
+</main>
+<footer><div class="bar"><span>ssmix 0.1.0 · Angshul Majumdar</span><a href="https://github.com/AngshulMajumdar/ssmix">github.com/AngshulMajumdar/ssmix</a></div></footer>
+</body>
+</html>

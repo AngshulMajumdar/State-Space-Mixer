@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API · ssmix</title>
+<meta name="description" content="ssmix: training-free scale-space transformers on Daubechies wavelets.">
+<link rel="stylesheet" href="style.css">
+
+</head>
+<body>
+<header><div class="bar"><a class="brand" href="index.html">ss<span>mix</span></a>
+<nav><a href="index.html">Overview</a><a href="article.html">Article</a><a href="method.html">Method</a><a href="api.html" class=on>API</a><a href="benchmarks.html">Benchmarks</a><a class="gh" href="https://github.com/AngshulMajumdar/ssmix">GitHub</a></nav></div></header>
+<main>
+<h1>API reference</h1>
+<p class=lead>Everything below is importable from <code>ssmix</code>. All modules are parameter-free <code>torch.nn.Module</code>s that run on CPU or CUDA and take <code>(batch, tokens, channels)</code> unless stated.</p>
+<ul class=toc><li><a href="#AudioEmbedder"><code>AudioEmbedder</code></a></li><li><a href="#SWTCrossScaleMixer"><code>SWTCrossScaleMixer</code></a></li><li><a href="#CrossScaleMixer"><code>CrossScaleMixer</code></a></li><li><a href="#ScaleSpaceMixer"><code>ScaleSpaceMixer</code></a></li><li><a href="#DWT"><code>DWT</code></a></li><li><a href="#daubechies"><code>daubechies</code></a></li><li><a href="#daubechies_lowpass"><code>daubechies_lowpass</code></a></li><li><a href="#qmf_highpass"><code>qmf_highpass</code></a></li></ul>
+<div class="api-item" id="AudioEmbedder"><h3>class AudioEmbedder</h3>
+<p class="sig">ssmix.AudioEmbedder(depth: int = 2, sample_rate: int = 32000, n_mels: int = 128, order: int = 4, heads: int = 16, window: int = 2, tau: float = 0.1, levels: Optional[int] = None, freq_order: int = 2, readout: Sequence[str] = (&#x27;bands&#x27;, &#x27;freq&#x27;, &#x27;stats&#x27;, &#x27;mixed&#x27;, &#x27;attn&#x27;, &#x27;env&#x27;))</p>
+<pre class="doc">Training-free audio transformer that maps waveforms to fixed-size embeddings.
+
+Pipeline:
+    log-mel spectrogram (25 ms window, 10 ms hop)  -&gt;  per-clip normalisation
+    depth x [ undecimated Daubechies scale space along time
+              -&gt; cross-scale attention (siblings, parent, children)
+              -&gt; exact tight-frame synthesis ]
+    readout of every block, pooled over time.
+
+The model has no learnable parameters and needs no training data.
+
+Args:
+    depth:       number of mixer blocks.
+    sample_rate: rate the model operates at; `embed` resamples inputs to it.
+    n_mels:      mel bands.
+    order:       Daubechies order N of the time-axis frame (support 2N-1).
+    heads:       attention heads (mel bands are split into `heads` groups).
+    window:      sibling half-width k of the cross-scale neighbourhood.
+    tau:         attention temperature.
+    levels:      wavelet levels J (None: chosen from the clip length).
+    freq_order:  Daubechies order of the spectral (mel-axis) scale space used in the readout.
+    readout:     subset of (&quot;bands&quot;, &quot;bstd&quot;, &quot;freq&quot;, &quot;stats&quot;, &quot;mixed&quot;, &quot;attn&quot;, &quot;astd&quot;, &quot;env&quot;).
+
+Readout terms (per block unless noted):
+    bands  log mean_t |W_s| before mixing, per band and mel bin
+    bstd   std_t log|W_s| before mixing
+    freq   log mean_t |spectral scale-space band|, per band and mel bin
+    stats  mean_t and std_t of the normalised log-mel state
+    mixed  log mean_t |W&#x27;_s| after mixing
+    attn   mean_t cross-scale attention weight, per band, link and head
+    astd   std_t of the cross-scale attention weights
+    env    mean log-mel spectrum before normalisation (once, appended last)
+
+Example:
+    &gt;&gt;&gt; emb = AudioEmbedder()
+    &gt;&gt;&gt; E = emb.embed([wave_a, wave_b], sample_rate=44100)   # (2, D) numpy array</pre>
+<div class="method"><p class="sig"><b>save_pretrained</b>(self, directory: str) -&gt; str</p><pre class="doc">Write config.json to `directory` (there are no weights). Returns the file path.</pre></div>
+<div class="method"><p class="sig"><b>forward</b>(self, wav: torch.Tensor) -&gt; torch.Tensor</p><pre class="doc">Embed a batch of equal-length waveforms.
+
+Args:
+    wav: (B, N) float tensor at `sample_rate`, values in [-1, 1].
+Returns:
+    (B, D) embedding.</pre></div>
+<div class="method"><p class="sig"><b>dim</b>(self, num_samples: int) -&gt; int</p><pre class="doc">Embedding dimension for clips of `num_samples` samples at `sample_rate`.</pre></div>
+<div class="method"><p class="sig"><b>embed</b>(self, audio: Union[numpy.ndarray, torch.Tensor, Iterable[Union[numpy.ndarray, torch.Tensor]]], sample_rate: Optional[int] = None, batch_size: int = 16, length: Optional[float] = None) -&gt; numpy.ndarray</p><pre class="doc">Embed one clip, a batch, or a list of clips of any lengths.
+
+Args:
+    audio:       1-D waveform, (B, N) array/tensor, or a list of 1-D waveforms (mono, [-1, 1]).
+    sample_rate: rate of `audio`; resampled to `self.sample_rate` when different.
+    batch_size:  clips per forward pass.
+    length:      if given, every clip is zero-padded or cut to this many seconds, so all
+                 embeddings share one dimension. Without it, clips of different lengths
+                 can have different embedding sizes (the number of wavelet levels
+                 follows the clip length).
+Returns:
+    (B, D) float32 numpy array (rows in input order).</pre></div>
+</div>
+<div class="api-item" id="SWTCrossScaleMixer"><h3>class SWTCrossScaleMixer</h3>
+<p class="sig">ssmix.SWTCrossScaleMixer(order=4, levels=None, heads=8, window=1, tau=0.1, scales=(-1, 0, 1), pad=&#x27;reflect&#x27;)</p>
+<pre class="doc">Cross-scale attention on the undecimated, delay-aligned Daubechies tight frame.
+
+Every band s = 0..J (J details + approximation) has a token at every instant t.
+Token (s, t) attends to the bands s-1, s, s+1 at instants t + o * 2^{lev(s&#x27;)},
+|o| &lt;= k (lev = dyadic level of the key band), i.e. its dyadic siblings, parent
+and children on the same grid as the decimated tree, without decimation, so the
+operator is shift-equivariant. Weights: parameter-free cosine attention per head;
+values are the raw coefficients. tau -&gt; 0 is the exact identity (self has
+cosine 1); synthesis is the tight-frame adjoint.  Input/output (B, T, C).</pre>
+<div class="method"><p class="sig"><b>coefficients</b>(self, x)</p><pre class="doc">(B, T, C) -&gt; padded coefficients Wp (B, S, C, n), plan, T.</pre></div>
+<div class="method"><p class="sig"><b>synthesize</b>(self, Wp, plan, T)</p><pre class="doc">Padded coefficients (B, S, C, n) -&gt; (B, T, C) by the tight-frame adjoint (exact inverse).</pre></div>
+<div class="method"><p class="sig"><b>links</b>(self, S)</p><pre class="doc">Key list of every band: [(key band, time shift in samples)], self first.</pre></div>
+<div class="method"><p class="sig"><b>mix</b>(self, Wp)</p><pre class="doc">One synchronous cross-scale attention update on padded coefficients (B, S, C, n).
+
+Layout (B, S, H, n, D) keeps each head&#x27;s channels contiguous; tokens are normalised once
+and keys are never materialised, so memory is O(B S C n) and the work is
+O(B S C n (2k+1) |scales|) multiply-adds.</pre></div>
+<div class="method"><p class="sig"><b>forward</b>(self, x)</p><pre class="doc">(B, T, C) -&gt; (B, T, C): analysis, one cross-scale attention update, synthesis.</pre></div>
+</div>
+<div class="api-item" id="CrossScaleMixer"><h3>class CrossScaleMixer</h3>
+<p class="sig">ssmix.CrossScaleMixer(order=4, levels: Optional[int] = None, max_levels=8, heads=1, window=2, tau=0.1, parent=True, children=True, pad=&#x27;reflect&#x27;)</p>
+<pre class="doc">Parameter-free cross-scale attention token mixer. Input/output (B, T, C).
+
+Args:
+    order:  Daubechies order N (support 2N-1).
+    levels: J (None -&gt; as many as the padded length allows, capped at max_levels).
+    heads:  channel groups with independent attention.
+    window: sibling half-width k.
+    tau:    cosine-attention temperature (tau -&gt; 0 is the identity).
+    parent / children: include those links.</pre>
+<div class="method"><p class="sig"><b>coefficients</b>(self, x)</p><pre class="doc">(B, T, C) -&gt; ([D_1..D_J], A_J) each (B, C, N/2^s), plus padding info.</pre></div>
+<div class="method"><p class="sig"><b>mix</b>(self, ds, a)</p><pre class="doc">One synchronous cross-scale attention update. Bands: (B, C, n_s).</pre></div>
+<div class="method"><p class="sig"><b>forward</b>(self, x)</p><pre class="doc">(B, T, C) -&gt; (B, T, C): DWT, one cross-scale attention update, inverse DWT.</pre></div>
+</div>
+<div class="api-item" id="ScaleSpaceMixer"><h3>class ScaleSpaceMixer</h3>
+<p class="sig">ssmix.ScaleSpaceMixer(order: Optional[int] = 4, support: Optional[int] = None, levels: Optional[int] = None, heads: int = 1, rule: str = &#x27;attention&#x27;, tau: float = 1.0, kappa: float = 1.0, pad: str = &#x27;reflect&#x27;, delay_compensation: bool = True, fast_fft: bool = True, pad_tol: float = 1e-08, eps: float = 1e-12)</p>
+<pre class="doc">Undecimated Daubechies tight frame (FFT-batched, any T) with parameter-free gate rules.
+
+Args:
+    order:     Daubechies order N (N vanishing moments, support 2N-1).
+    support:   alternative to `order`; must be odd (= 2N-1).
+    levels:    number of detail levels J (None -&gt; as many as fit T, max 10).
+    heads:     channel groups sharing one scale-attention pattern.
+    rule:      &#x27;attention&#x27; | &#x27;shrink&#x27; | &#x27;identity&#x27;.
+    tau:       attention temperature.
+    kappa:     energy-smoothing width, in units of each band&#x27;s dyadic scale.
+    pad:       &#x27;reflect&#x27; (no wrap-around artefacts) or &#x27;circular&#x27;.
+    delay_compensation: align bands in time (pure phase; keeps PR).
+    fast_fft:  extend padded length to a 5-smooth FFT size.
+    pad_tol:   reflect padding covers all but this fraction of every band&#x27;s
+               impulse-response energy (PR is exact for any value).
+Input/Output: (B, T, C).</pre>
+<div class="method"><p class="sig"><b>num_levels</b>(self, T: int) -&gt; int</p><pre class="doc">Detail levels J used for length T (the `levels` argument, or as many as fit, at most 10).</pre></div>
+<div class="method"><p class="sig"><b>analysis</b>(self, x: torch.Tensor) -&gt; torch.Tensor</p><pre class="doc">(B, T, C) -&gt; (B, J+1, T, C) band coefficients (on the unpadded grid).</pre></div>
+<div class="method"><p class="sig"><b>synthesis</b>(self, W: torch.Tensor) -&gt; torch.Tensor</p><pre class="doc">Adjoint of `analysis` in circular mode; (B, J+1, T, C) -&gt; (B, T, C).
+(In reflect mode use forward(); W here lives on the unpadded grid.)</pre></div>
+<div class="method"><p class="sig"><b>gates</b>(self, x: torch.Tensor) -&gt; torch.Tensor</p><pre class="doc">Gate field (B, J+1, T, C) the mixer applies to x (for inspection).</pre></div>
+<div class="method"><p class="sig"><b>forward</b>(self, x: torch.Tensor) -&gt; torch.Tensor</p><pre class="doc">(B, T, C) -&gt; (B, T, C): analysis, gate rule, synthesis (rule=&#x27;identity&#x27; returns x).</pre></div>
+</div>
+<div class="api-item" id="DWT"><h3>class DWT</h3>
+<p class="sig">ssmix.DWT(order: int = 4)</p>
+<pre class="doc">Periodic orthonormal DWT along the last axis of (..., N), N % 2^J == 0.</pre>
+<div class="method"><p class="sig"><b>max_levels</b>(self, N: int) -&gt; int</p><pre class="doc">Largest J with N divisible by 2^J and the coarsest band no shorter than the filter.</pre></div>
+<div class="method"><p class="sig"><b>forward</b>(self, x: torch.Tensor, J: int) -&gt; Tuple[List[torch.Tensor], torch.Tensor]</p><pre class="doc">J-level DWT of (..., N). Returns ([D_1, ..., D_J], A_J), D_j of length N / 2^j.
+Identical to PyWavelets wavedec(x, f&quot;db{order}&quot;, mode=&quot;periodization&quot;, level=J).</pre></div>
+<div class="method"><p class="sig"><b>inverse</b>(self, ds: List[torch.Tensor], a: torch.Tensor) -&gt; torch.Tensor</p><pre class="doc">Exact inverse (adjoint) of forward: ([D_1, ..., D_J], A_J) -&gt; (..., N).</pre></div>
+</div>
+<div class="api-item" id="daubechies"><h3>function daubechies</h3>
+<p class="sig">ssmix.daubechies(order: int)</p>
+<pre class="doc">(h, g): orthonormal Daubechies lowpass and highpass filters of the given order (2*order taps).
+Identical to PyWavelets dbN rec_lo / rec_hi.</pre>
+</div>
+<div class="api-item" id="daubechies_lowpass"><h3>function daubechies_lowpass</h3>
+<p class="sig">ssmix.daubechies_lowpass(order: int) -&gt; numpy.ndarray</p>
+<pre class="doc">Orthonormal lowpass h (sum h = sqrt 2, sum h^2 = 1), length 2*order.</pre>
+</div>
+<div class="api-item" id="qmf_highpass"><h3>function qmf_highpass</h3>
+<p class="sig">ssmix.qmf_highpass(h: numpy.ndarray) -&gt; numpy.ndarray</p>
+<pre class="doc">g[n] = (-1)^n h[L-1-n]  (PyWavelets rec_hi convention).</pre>
+</div>
+</main>
+<footer><div class="bar"><span>ssmix 0.1.0 · Angshul Majumdar</span><a href="https://github.com/AngshulMajumdar/ssmix">github.com/AngshulMajumdar/ssmix</a></div></footer>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Method · ssmix</title>
+<meta name="description" content="ssmix: training-free scale-space transformers on Daubechies wavelets.">
+<link rel="stylesheet" href="style.css">
+<script>window.MathJax={tex:{inlineMath:[["\\(","\\)"]]}};</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</head>
+<body>
+<header><div class="bar"><a class="brand" href="index.html">ss<span>mix</span></a>
+<nav><a href="index.html">Overview</a><a href="article.html">Article</a><a href="method.html" class=on>Method</a><a href="api.html">API</a><a href="benchmarks.html">Benchmarks</a><a class="gh" href="https://github.com/AngshulMajumdar/ssmix">GitHub</a></nav></div></header>
+<main>
+
+<h1>Method</h1>
+<p class=lead>Three exact building blocks: Daubechies filters of controllable support, a tight frame
+that computes every scale in one batched FFT, and a parameter-free cross-scale attention defined on that frame.</p>
+
+<h2>1. Daubechies filters of any order</h2>
+<p>Order \(N\) gives \(N\) vanishing moments and support \(2N-1\). The lowpass filter is obtained from
+\(|H(\omega)|^2 = 2\cos^{2N}(\omega/2)\,P(\sin^2(\omega/2))\) with
+\(P(y)=\sum_{k\lt N}\binom{N-1+k}{k}y^k\). Each root of \(P\) maps to a pair \(z, 1/z\); keeping
+\(|z|\lt 1\) gives the extremal-phase factor. Roots are found at high precision with mpmath, so large
+orders remain exact. The highpass is \(g[n] = (-1)^n h[L-1-n]\).</p>
+
+<h2>2. A tight frame in one FFT</h2>
+<p>The undecimated transform of a length-\(T\) signal has the band transfer functions</p>
+<p>\[ D_j(\omega)=\tilde G(2^{j-1}\omega)\prod_{k\lt j-1}\tilde H(2^k\omega),\qquad
+A_J(\omega)=\prod_{k\lt J}\tilde H(2^k\omega),\qquad \tilde H = H/\sqrt2,\ \tilde G = G/\sqrt2 . \]</p>
+<p>Because \(|\tilde H|^2+|\tilde G|^2=1\), the sum telescopes to \(\sum_s|\Psi_s(\omega)|^2=1\): a
+Parseval tight frame, with exact reconstruction by the adjoint for any \(T\). The responses are evaluated
+on the DFT grid, so all \(J+1\) bands come from one rFFT and one batched inverse. The cost,
+\(O(T\log T)\) per band, does not depend on the filter support. Each band receives an integer
+group-delay compensation (a pure phase), so index \(t\) refers to the same instant at every scale.</p>
+
+<h2>3. Cross-scale attention</h2>
+<p>Tokens are the frame coefficients \(w_s(t)\in\mathbb R^C\). Token \((s,t)\) attends to the
+neighbourhood</p>
+<p>\[ \mathcal N(s,t)=\{(s',\,t+o\,2^{\ell(s')}) : s'\in\{s-1,s,s+1\},\ |o|\le k\}, \]</p>
+<p>that is, its dyadic siblings, parent and children on the undecimated grid (\(\ell\) is the dyadic level of
+a band). With per-head cosine weights</p>
+<p>\[ a_{n}=\operatorname{softmax}_{n\in\mathcal N(s,t)}\frac{\langle\hat w_s(t),\hat w_n\rangle}{\tau},\qquad
+w'_s(t)=\sum_{n\in\mathcal N(s,t)}a_n\,w_n , \]</p>
+<p>followed by the exact synthesis. The operator has no parameters. It is shift-equivariant and
+1-homogeneous, and it is exactly the identity as \(\tau\to0\), because each token's cosine with itself is maximal.
+Each head's channels are contiguous and keys are never materialised. Memory is therefore
+\(O(SCT)\) and the work is \(O(SCT\,(2k+1)\cdot 3)\), linear in sequence length.</p>
+
+<h2>4. Audio embedder</h2>
+<p>The <code>AudioEmbedder</code> runs at 32 kHz with 128 mel bands (25 ms window, 10 ms hop) and per-clip
+normalisation, followed by two cross-scale mixer blocks (db4, 16 heads, \(k=2\), \(\tau=0.1\)). For each block the readout
+pools over time:</p>
+<ul>
+<li>band magnitudes \(\log\overline{|w_s|}\) before and after mixing;</li>
+<li>the mean attention weight of every cross-scale link and head, which records how strongly each
+scale couples to its parent, children and siblings;</li>
+<li>a spectral scale space along the mel axis, and the state statistics.</li>
+</ul>
+<p>The mean log-mel envelope is appended once, at the end.</p>
+
+</main>
+<footer><div class="bar"><span>ssmix 0.1.0 · Angshul Majumdar</span><a href="https://github.com/AngshulMajumdar/ssmix">github.com/AngshulMajumdar/ssmix</a></div></footer>
+</body>
+</html>

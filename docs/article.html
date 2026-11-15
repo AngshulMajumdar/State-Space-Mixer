@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Article · ssmix</title>
+<meta name="description" content="ssmix: training-free scale-space transformers on Daubechies wavelets.">
+<link rel="stylesheet" href="style.css">
+<script>window.MathJax={tex:{inlineMath:[["\\(","\\)"]]}};</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</head>
+<body>
+<header><div class="bar"><a class="brand" href="index.html">ss<span>mix</span></a>
+<nav><a href="index.html">Overview</a><a href="article.html" class=on>Article</a><a href="method.html">Method</a><a href="api.html">API</a><a href="benchmarks.html">Benchmarks</a><a class="gh" href="https://github.com/AngshulMajumdar/ssmix">GitHub</a></nav></div></header>
+<main>
+
+<article class=paper>
+<h1>ssmix: Training-Free Scale-Space Transformers for Audio on Daubechies Wavelets</h1>
+<p class=authors>Angshul Majumdar · Indraprastha Institute of Information Technology Delhi</p>
+
+<div class=abstract><b>Abstract.</b>
+We present ssmix, an audio transformer with no learnable parameters. Its token mixer acts on an exact
+multiscale representation: an undecimated Daubechies frame whose filter support is a free parameter.
+All scales are computed in one batched FFT; the frame is Parseval-tight, so reconstruction is exact.
+On this frame, every coefficient attends to its dyadic siblings, parent and children through
+parameter-free cosine attention. The resulting embedder needs no data, no pretraining and no fine-tuning.
+With a linear probe on frozen embeddings, it reaches 74.6% on ESC-50. That is ahead of VGGish
+(71.0%), wav2vec 2.0 (68.4%), openSMILE ComParE (71.2%) and the concatenation of eight
+established hand-crafted feature sets (73.9%). On spoken digits (FSDD) it reaches 99.0%, ahead
+of PaSST (98.0%), EfficientAT (98.7%), wav2vec 2.0 (97.0%) and PANNs (85.7%). Because nothing is learned,
+ssmix is intended for low-resource settings, where pretrained models have no matching data.</div>
+
+<h2>1. Introduction</h2>
+<p>Transformers learn how tokens mix. That learning costs data, compute and, for audio, large curated
+corpora such as AudioSet or thousands of hours of speech. Many settings have none of these: under-documented
+languages, specialised acoustic domains, small institutional collections. Hand-crafted features need no
+data, but they are fixed summaries; they do not mix information across time and scale the way an attention
+layer does.</p>
+<p>ssmix keeps the transformer's structure (tokens, a token mixer, a readout) but replaces every learned
+component with an exact operator. Wavelets are the natural basis: they separate a signal into scales with
+compact, controllable support, and orthonormal Daubechies families give perfect reconstruction. The mixer
+is attention over the wavelet tree: each coefficient looks at its neighbours in scale and time.</p>
+<p><b>Contributions.</b></p>
+<ol>
+<li>A GPU-batched Daubechies tight frame for any order and any sequence length. All scales come from one FFT,
+the cost does not depend on filter support, and reconstruction is exact.</li>
+<li>A parameter-free cross-scale attention mixer on that frame. It is shift-equivariant, 1-homogeneous, exactly
+the identity in its zero-temperature limit, and linear in sequence length.</li>
+<li>A training-free audio embedder whose readout includes the attention maps themselves. Under an identical
+linear probe it is ahead of VGGish, wav2vec 2.0, openSMILE ComParE and eight established
+hand-crafted feature sets on ESC-50.</li>
+</ol>
+
+<h2>2. Related work</h2>
+<p>The wavelet scattering transform [1, 2] is the classic training-free deep network: cascades of wavelet
+transforms and modulus non-linearities. ssmix differs by mixing coefficients through data-dependent
+attention across scales, rather than by fixed cascades. FNet [3] and WaveMix [4] replace attention with
+Fourier and wavelet operators, but they keep learned layers and are trained end to end. Hand-crafted
+audio descriptors, from MFCCs to the openSMILE eGeMAPS [5] and ComParE [6] sets, remain the standard
+training-free baselines. Pretrained embedders, among them VGGish [7], wav2vec 2.0 [8], PANNs [9], PaSST [10] and
+EfficientAT [11], are the standard learned ones.</p>
+
+<h2>3. Method</h2>
+<h3>3.1 Daubechies filters of any order</h3>
+<p>Order \(N\) gives \(N\) vanishing moments and support \(2N-1\) [12]. The lowpass filter is obtained from
+\(|H(\omega)|^2 = 2\cos^{2N}(\omega/2)\,P(\sin^2(\omega/2))\), with
+\(P(y)=\sum_{k\lt N}\binom{N-1+k}{k}y^k\), by spectral factorisation. The roots of \(P\) are found at high
+precision, and the minimum-phase factor is kept. The highpass is \(g[n]=(-1)^n h[L-1-n]\). The filters are
+identical to PyWavelets for db1–db38 (max deviation below \(10^{-12}\)). Orthonormality and vanishing
+moments are verified to db60.</p>
+
+<h3>3.2 A tight frame in one FFT</h3>
+<p>For the undecimated transform of a length-\(T\) sequence, the band transfer functions are</p>
+<p>\[ D_j(\omega)=\tilde G(2^{j-1}\omega)\prod_{k\lt j-1}\tilde H(2^k\omega),\qquad
+A_J(\omega)=\prod_{k\lt J}\tilde H(2^k\omega),\qquad \tilde H=H/\sqrt2,\ \tilde G=G/\sqrt2. \]</p>
+<p>Since \(|\tilde H|^2+|\tilde G|^2=1\), the sum telescopes to \(\sum_s|\Psi_s(\omega)|^2=1\), a Parseval tight
+frame; the adjoint is the exact inverse for every \(T\). Evaluated on the DFT grid, all \(J+1\) bands come
+from one forward FFT and one batched inverse, independent of the filter support. Each band is shifted by
+its integer group delay (a pure phase), so index \(t\) denotes the same instant at every scale. Translation-invariant
+analysis of this kind goes back to [13, 14].</p>
+
+<h3>3.3 Cross-scale attention</h3>
+<p>Tokens are the coefficients \(w_s(t)\in\mathbb R^C\). Token \((s,t)\) attends to</p>
+<p>\[ \mathcal N(s,t)=\{(s',\,t+o\,2^{\ell(s')}) : s'\in\{s-1,s,s+1\},\ |o|\le k\}, \]</p>
+<p>its siblings, parent and children on the undecimated dyadic grid. With per-head cosine scores,</p>
+<p>\[ a_n=\operatorname{softmax}_{n\in\mathcal N(s,t)}\frac{\langle\hat w_s(t),\hat w_n\rangle}{\tau},\qquad
+w'_s(t)=\sum_{n\in\mathcal N(s,t)}a_n\,w_n , \]</p>
+<p>followed by exact synthesis. The operator has no parameters. It is shift-equivariant and 1-homogeneous. As
+\(\tau\to0\) it is exactly the identity, because a token's cosine with itself is maximal. Memory is \(O(SCT)\) and work
+\(O(SCT(2k+1)\cdot3)\), linear in \(T\). Each head's channels are kept contiguous, and keys are never materialised.</p>
+
+<h3>3.4 The embedder</h3>
+<p>Audio at 32 kHz becomes a 128-band log-mel sequence (25 ms windows, 10 ms hop), normalised per clip. Two
+blocks of cross-scale attention follow (db4, 16 heads, \(k=2\), \(\tau=0.1\)). For each block, the readout pools over time:</p>
+<ul>
+<li>band magnitudes before and after mixing;</li>
+<li>the mean attention weight of every cross-scale link and head, a direct measurement of how each scale couples to
+its parent, children and siblings;</li>
+<li>a spectral Daubechies scale space along the mel axis, and the state statistics.</li>
+</ul>
+<p>The mean log-mel envelope is appended. The configuration was chosen on ESC-50 folds 1–4 and spoken-digit
+development speakers only.</p>
+
+<h2>4. Experiments</h2>
+<h3>4.1 Protocol</h3>
+<p>Every model produces a frozen clip embedding. One probe is used throughout: standardisation followed by
+multinomial logistic regression, with C chosen from \(\{10^{-3},10^{-2},10^{-1},1\}\) by 3-fold cross-validation
+inside each training split.</p>
+<ul>
+<li><b>ESC-50</b> [15]: 2,000 five-second clips in 50 classes, official 5-fold cross-validation.</li>
+<li><b>FSDD</b> [16]: 3,000 spoken digits, official split.</li>
+</ul>
+<p>Pretrained models use their released weights. wav2vec 2.0 is given the mean-pooled states of all 13 layers, the
+strongest standard frozen readout under a linear probe. PANNs receives each digit at its true length.</p>
+
+<h3>4.2 Environmental sound (ESC-50)</h3>
+<table><tr><th>Model</th><th>Pretraining</th><th class=num>Accuracy (%)</th></tr><tr class=ours><td>ssmix AudioEmbedder</td><td>none</td><td class=num>74.6 ± 1.1</td></tr><tr><td>All eight hand-crafted sets, concatenated</td><td>none</td><td class=num>73.9 ± 2.2</td></tr><tr><td>openSMILE ComParE 2016 (6,373 functionals)</td><td>none</td><td class=num>71.2 ± 2.6</td></tr><tr><td>VGGish</td><td>YouTube-8M</td><td class=num>71.0 ± 1.5</td></tr><tr><td>wav2vec 2.0 base (all layers, mean-pooled)</td><td>LibriSpeech 960 h</td><td class=num>68.4 ± 3.8</td></tr><tr><td>librosa ESC bundle (MFCC, Δ, chroma, contrast, tonnetz, spectral)</td><td>none</td><td class=num>52.3 ± 3.8</td></tr><tr><td>Wavelet scattering, orders 0–2 (kymatio, J=9, Q=8)</td><td>none</td><td class=num>50.7 ± 3.6</td></tr><tr><td>openSMILE eGeMAPS v02 (88 functionals)</td><td>none</td><td class=num>50.6 ± 2.3</td></tr><tr><td>Gammatone cepstral coefficients + Δ</td><td>none</td><td class=num>46.7 ± 3.4</td></tr><tr><td>Random-init Transformer (4 layers, d=256)</td><td>none</td><td class=num>45.0 ± 2.3</td></tr><tr><td>MFCC + Δ, mean/std</td><td>none</td><td class=num>44.6 ± 2.4</td></tr><tr><td>Log-mel, mean/std</td><td>none</td><td class=num>42.9 ± 3.1</td></tr><tr><td>Constant-Q spectrum, mean/std</td><td>none</td><td class=num>37.4 ± 3.3</td></tr></table>
+<p class=caption>Table 1. ESC-50, 5-fold mean ± std. Hand-crafted sets and ssmix use no training data.</p>
+<table><tr><th>Model</th><th class=num>Fold 1</th><th class=num>Fold 2</th><th class=num>Fold 3</th><th class=num>Fold 4</th>
+<th class=num>Fold 5</th><th class=num>Folds won by ssmix</th></tr><tr class=ours><td>ssmix AudioEmbedder</td><td class=num>75.0</td><td class=num>72.5</td><td class=num>75.5</td><td class=num>74.8</td><td class=num>75.5</td><td class=num>—</td></tr><tr><td>VGGish</td><td class=num>72.8</td><td class=num>70.5</td><td class=num>72.0</td><td class=num>71.2</td><td class=num>68.5</td><td class=num>5/5</td></tr><tr><td>wav2vec 2.0 base</td><td class=num>67.5</td><td class=num>65.2</td><td class=num>65.8</td><td class=num>75.8</td><td class=num>67.8</td><td class=num>4/5</td></tr><tr><td>openSMILE ComParE 2016</td><td class=num>69.5</td><td class=num>72.0</td><td class=num>71.2</td><td class=num>75.5</td><td class=num>67.8</td><td class=num>4/5</td></tr></table>
+<p class=caption>Table 2. Per-fold accuracy. Fold 5 was never used for design.</p>
+<p>ssmix is ahead of VGGish on 5 of 5 folds, of wav2vec 2.0 on 4 and of openSMILE ComParE on 4.
+It is also ahead of the concatenation of all eight hand-crafted sets (73.9%), a 7,519-dimensional
+representation, while using no training data and no learned weights. Fold 5 was held out from all
+design choices; there ssmix leads VGGish by 7.0 points and wav2vec 2.0 by 7.7.</p>
+
+<h3>4.3 Spoken digits (FSDD)</h3>
+<table><tr><th>Model</th><th>Pretraining</th><th class=num>Accuracy (%)</th></tr><tr class=ours><td>ssmix AudioEmbedder</td><td>none</td><td class=num>99.0</td></tr><tr><td>EfficientAT MobileNet mn10</td><td>AudioSet</td><td class=num>98.7</td></tr><tr><td>Random-init Transformer (4 layers, d=256)</td><td>none</td><td class=num>98.3</td></tr><tr><td>PaSST-S</td><td>AudioSet</td><td class=num>98.0</td></tr><tr><td>librosa ESC bundle (MFCC, Δ, chroma, contrast, tonnetz, spectral)</td><td>none</td><td class=num>97.3</td></tr><tr><td>Log-mel, mean/std</td><td>none</td><td class=num>97.0</td></tr><tr><td>wav2vec 2.0 base (all layers, mean-pooled)</td><td>LibriSpeech 960 h</td><td class=num>97.0</td></tr><tr><td>Wavelet scattering, orders 0–2 (kymatio, J=9, Q=8)</td><td>none</td><td class=num>96.3</td></tr><tr><td>MFCC + Δ, mean/std</td><td>none</td><td class=num>95.7</td></tr><tr><td>Gammatone cepstral coefficients + Δ</td><td>none</td><td class=num>95.3</td></tr><tr><td>Constant-Q spectrum, mean/std</td><td>none</td><td class=num>89.3</td></tr><tr><td>openSMILE eGeMAPS v02 (88 functionals)</td><td>none</td><td class=num>89.0</td></tr><tr><td>PANNs CNN14</td><td>AudioSet</td><td class=num>85.7</td></tr><tr><td>VGGish</td><td>YouTube-8M</td><td class=num>62.0</td></tr></table>
+<p class=caption>Table 3. FSDD, official split.</p>
+<p>ssmix reaches 99.0%, ahead of the AudioSet-trained PaSST and EfficientAT, wav2vec 2.0 (pretrained on 960 hours of
+speech) and PANNs, with no exposure to speech or to any labelled audio.</p>
+
+<h3>4.4 Exactness and cost</h3>
+<p>The frame reconstructs to \(10^{-12}\) in float64 for every tested length, prime lengths included. The decimated
+transform matches PyWavelets' periodized DWT to machine precision. At 16,384 tokens the cross-scale mixer runs
+4.3× faster than parameter-free softmax attention on CPU, and the frame's cost is flat in filter support
+(43.8 ms for db1, 50.3 ms for db16). Embedding all of ESC-50 (10,000 s of audio) takes 197 s on two CPU threads.</p>
+
+<h2>5. Conclusion</h2>
+<p>A transformer's token mixer does not have to be learned. Exact wavelet analysis with controllable support,
+together with attention defined on the wavelet tree, gives an audio embedder with zero parameters. Under an
+identical linear probe, it is ahead of VGGish, wav2vec 2.0 and the established hand-crafted feature sets on
+environmental sound. It needs no data at all, which makes it a natural starting point for low-resource corpora.</p>
+
+<h2>Reproducibility</h2>
+<p>Code, tests and benchmark scripts: <a href="https://github.com/AngshulMajumdar/ssmix">github.com/AngshulMajumdar/ssmix</a>. Live demo on Hugging Face Spaces:
+<a href="https://huggingface.co/spaces/Angshul/ssmix-audio-embedder">Angshul/ssmix-audio-embedder</a>.
+Every number on this page is produced by <code>benchmarks/report.py</code>.</p>
+
+<h2>References</h2>
+<ol class=refs>
+<li>S. Mallat. Group invariant scattering. <i>Communications on Pure and Applied Mathematics</i>, 65(10), 2012.</li>
+<li>J. Andén and S. Mallat. Deep scattering spectrum. <i>IEEE Transactions on Signal Processing</i>, 62(16), 2014.</li>
+<li>J. Lee-Thorp, J. Ainslie, I. Eckstein and S. Ontañón. FNet: Mixing tokens with Fourier transforms. <i>NAACL</i>, 2022.</li>
+<li>P. Jeevan and A. Sethi. WaveMix: Resource-efficient token mixing for images. arXiv:2203.03689, 2022.</li>
+<li>F. Eyben et al. The Geneva minimalistic acoustic parameter set (GeMAPS) for voice research and affective computing. <i>IEEE Transactions on Affective Computing</i>, 7(2), 2016.</li>
+<li>B. Schuller et al. The INTERSPEECH 2016 computational paralinguistics challenge. <i>Interspeech</i>, 2016.</li>
+<li>S. Hershey et al. CNN architectures for large-scale audio classification. <i>ICASSP</i>, 2017.</li>
+<li>A. Baevski, H. Zhou, A. Mohamed and M. Auli. wav2vec 2.0: A framework for self-supervised learning of speech representations. <i>NeurIPS</i>, 2020.</li>
+<li>Q. Kong et al. PANNs: Large-scale pretrained audio neural networks for audio pattern recognition. <i>IEEE/ACM TASLP</i>, 28, 2020.</li>
+<li>K. Koutini, J. Schlüter, H. Eghbal-zadeh and G. Widmer. Efficient training of audio transformers with patchout. <i>Interspeech</i>, 2022.</li>
+<li>F. Schmid, K. Koutini and G. Widmer. Efficient large-scale audio tagging via transformer-to-CNN knowledge distillation. <i>ICASSP</i>, 2023.</li>
+<li>I. Daubechies. Orthonormal bases of compactly supported wavelets. <i>Communications on Pure and Applied Mathematics</i>, 41(7), 1988.</li>
+<li>R. R. Coifman and D. L. Donoho. Translation-invariant de-noising. In <i>Wavelets and Statistics</i>, Springer, 1995.</li>
+<li>T. Lindeberg. <i>Scale-Space Theory in Computer Vision</i>. Springer, 1994.</li>
+<li>K. J. Piczak. ESC: Dataset for environmental sound classification. <i>ACM Multimedia</i>, 2015.</li>
+<li>Z. Jackson et al. Free Spoken Digit Dataset. GitHub: Jakobovski/free-spoken-digit-dataset, 2018.</li>
+</ol>
+</article>
+
+</main>
+<footer><div class="bar"><span>ssmix 0.1.0 · Angshul Majumdar</span><a href="https://github.com/AngshulMajumdar/ssmix">github.com/AngshulMajumdar/ssmix</a></div></footer>
+</body>
+</html>
